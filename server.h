@@ -11,7 +11,7 @@ private:
 	    
 	std::queue<int> _clients;
 public:
-	Server(char* nodeName, char* serviceName, int nConnections = 5, int sendBufLen = 3000, int timeOut = 30) : Connection(sendBufLen,timeOut)
+	Server(char* nodeName, char* serviceName, int nConnections = 5, int sendBufLen = 1024, int timeOut = 30) : Connection(sendBufLen,timeOut)
 	{//ethernet frame = 1460 bytes
 		_serverSocket.reset(new ServerSocket(nodeName,serviceName, nConnections));
 		_contactSocket = nullptr;
@@ -101,7 +101,7 @@ protected:
 		if (!_serverSocket->makeUnblocked())
 			return nullptr;
 		//fcntl(_serverSocket->handle(),F_SETFL,O_NONBLOCK);
-		if (!_serverSocket->select(Socket::Selection::WriteCheck ,timeOut))
+		if (!_serverSocket->select(Socket::Selection::ReadCheck ,timeOut))
 		{	
 			_serverSocket->makeBlocked();
 			return nullptr ;

@@ -64,7 +64,8 @@ public:
 					return false;
 
 				//async buffer transmitting
-				_socket->select(Socket::Selection::WriteCheck, _timeOut);
+				if (!_socket->select(Socket::Selection::WriteCheck, _timeOut))
+					throw runtime_error("connection is lost");
 				bytesWrite = _socket->send(_buffer.data(), fileByteRead);
 
 				if (bytesWrite == SOCKET_ERROR)
@@ -73,7 +74,8 @@ public:
 				if (_rdFile.eof())
 				{
 					//waiting _timeOut / 2 
-					_socket->select(Socket::Selection::WriteCheck, _timeOut >> 1);
+					if (!_socket->select(Socket::Selection::WriteCheck, _timeOut >> 1))
+						throw runtime_error("connection is lost");
 					//check bytes that client has received
 					_socket->receive(_totallyBytesReceived);
 
@@ -124,7 +126,7 @@ public:
 			try
 			{
 
-				_socket->select(Socket::Selection::WriteCheck, _timeOut);
+				_socket->select(Socket::Selection::ReadCheck, _timeOut);
 				bytesRead = _socket->receive(_buffer.data(), _bufLen);
 
 				if (bytesRead == SOCKET_ERROR)

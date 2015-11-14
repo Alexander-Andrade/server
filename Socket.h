@@ -314,14 +314,14 @@ public:
 		FD_SET(_handle, &set);
 		int retVal = 0;
 
-		if (selection == Selection::WriteCheck)
+		if (selection == Selection::ReadCheck)
 			retVal = ::select(_handle + 1,	//Ignored. The nfds parameter is included only for compatibility with Berkeley sockets.
 				&set,//An optional pointer to a set of sockets to be checked for readability.
 				NULL,//An optional pointer to a set of sockets to be checked for writability.
 				NULL,//An optional pointer to a set of sockets to be checked for errors.
 				&timeOut	//The maximum time for select to wait (TIMEVAL structure)
 				);
-		else if (selection == Selection::ReadCheck)
+		else if (selection == Selection::WriteCheck)
 			retVal = ::select(_handle + 1, NULL, &set, NULL, &timeOut);
 
 		else if (selection == Selection::ExceptCheck)

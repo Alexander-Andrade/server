@@ -101,6 +101,7 @@ public:
 			cout << "there is no such file" << endl;
 			return false;
 		}
+		
 		_wrFile.open(_fileName, ios::out | ios::trunc | ios::binary);
 
 		if (!_wrFile.is_open())

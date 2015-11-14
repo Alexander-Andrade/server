@@ -469,10 +469,6 @@ protected:
 		//IP-portNo
 		_inetAddress.IP = IP;
 		_inetAddress.port = port;
-
-		//default send and receive socket system buffers size
-		void setDefaultSendRecvBufSizes();
-
 	}
 	template<typename T>
 	bool setSockOpt(int level, int optname, T optval)

@@ -13,7 +13,7 @@ private:
 
 	//socket refs
 	Socket* _socket;
-	std::function<Socket*(int)>* _tryToReconnect;
+	std::function<Socket*(int)> _tryToReconnect;
 	string _fileName;
 	int _fileLength;
 
@@ -40,8 +40,6 @@ public:
 		else
 			_socket->sendConfirm();
 
-		//make socket unblocked
-		_socket->makeUnblocked();
 		//total size of the transmitting file
 		_fileLength = getFileLength(_rdFile);
 
@@ -52,6 +50,8 @@ public:
 
 		int fileByteRead = 0;
 		int bytesWrite = 0;
+
+		_socket->makeUnblocked();
 
 		while (true)
 		{
@@ -86,10 +86,12 @@ public:
 			catch (exception e)
 			{
 				if (!tryToRestoreConnectionFromTransmittingSide()) break;
+				_socket->makeUnblocked();
 			}
 		}
 
 		_rdFile.close();
+		_socket->makeBlocked();
 		return true;
 	}
 
@@ -115,13 +117,14 @@ public:
 
 		int bytesRead = 0;
 
+		_socket->makeUnblocked();
 		//file writing
 		while (true)
 		{
 			try
 			{
 
-				//port reading
+				_socket->select(Socket::Selection::WriteCheck, _timeOut);
 				bytesRead = _socket->receive(_buffer.data(), _bufLen);
 
 				if (bytesRead == SOCKET_ERROR)
@@ -137,6 +140,7 @@ public:
 				if (_totallyBytesReceived == _fileLength)
 				{//file uploaded
 				 //transmit to server bytes number that has received
+					_socket->select(Socket::Selection::WriteCheck, _timeOut);
 					_socket->send(_totallyBytesReceived);
 					break;
 				}
@@ -144,10 +148,12 @@ public:
 			catch (exception e)
 			{
 				if (!tryToRestoreConnectionFromReceivingSide()) break;
+				_socket->makeUnblocked();
 			}
 		}
 
 		_wrFile.close();
+		_socket->makeBlocked();
 		return _fileLength == _totallyBytesReceived;
 	}
 
@@ -155,7 +161,7 @@ private:
 
 	bool tryToRestoreConnectionFromReceivingSide()
 	{
-		if ((_socket = _tryToReconnect->operator()(_timeOut)) == nullptr)
+		if ((_socket = _tryToReconnect(_timeOut)) == nullptr)
 		{
 			_wrFile.close();
 			return false;
@@ -167,7 +173,7 @@ private:
 
 	bool tryToRestoreConnectionFromTransmittingSide()
 	{
-		if ((_socket = _tryToReconnect->operator()(_timeOut)) == nullptr)
+		if ((_socket = _tryToReconnect(_timeOut)) == nullptr)
 		{
 			_rdFile.close();
 			return false;
@@ -187,7 +193,7 @@ private:
 	{
 		_socket = socket;
 		_fileName = fileName;
-		_tryToReconnect = &tryToReconnect;
+		_tryToReconnect = tryToReconnect;
 
 		_totallyBytesReceived = 0;
 		_fileLength = 0;

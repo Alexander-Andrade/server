@@ -64,7 +64,7 @@ protected:
 	{
 		bool retVal = Connection::sendFile(_contactSocket.get(), message, std::bind(&Server::tryToReconnect, this, std::placeholders::_1));
 	  
-		getAck(*_contactSocket);
+		_contactSocket->receiveAck();
 	       
 		retVal ? _contactSocket->sendMessage("file downloaded\n") : _contactSocket->sendMessage("fail to download the file\n");
 		return retVal;

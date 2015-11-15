@@ -47,10 +47,29 @@ public:
 		stream << endl;
 		return stream;
 	}
+	ostream& showPercents(ostream& stream, int loadingPercent, int milestone)
+	{
+		static int prevPercent;
+		int delta = 0;
+		if (loadingPercent != prevPercent)
+		{
+			//show milestones
+			if (loadingPercent % milestone == 0)
+				cout << (int)loadingPercent << " ";
+			else
+			{
+				delta = loadingPercent - prevPercent;
+				for (int i = 0;i < delta;i++)
+					cout << '.';
+			}
+			//it needless to show the same percent value
+			prevPercent = loadingPercent;
+		}
+	}
 	void trackSendPercent()
 	{
 		int loadingPercent = percentOfLoading(_totallyBytesSend);
-		cout << (int)loadingPercent << "%" << endl;
+		showPercents(cout, loadingPercent, 20);
 		//send OOB_byte
 		_socket->send_OOB_byte(loadingPercent);
 	}
@@ -58,8 +77,7 @@ public:
 	{
 		char loadingPercent = 0;
 		_socket->recv_OOB_byte(loadingPercent);
-		cout << (int)loadingPercent << "%" << endl;
-
+		showPercents(cout, loadingPercent, 20);
 	}
 	char percentOfLoading(int bytesWrite)
 	{

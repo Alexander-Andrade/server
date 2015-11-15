@@ -22,12 +22,14 @@ private:
 
 	//totaly number of bytes accurately received
 	int _totallyBytesReceived;
+	int _totallyBytesSend;
 public:
 	FileWorker(Socket* socket, std::function<Socket*(int)>& tryToReconnect, int bufLen, int timeOut) : _bufLen(bufLen), _timeOut(timeOut)
 	{
 		_socket = socket;
 		_tryToReconnect = tryToReconnect;
 
+		_totallyBytesReceived = 0;
 		_totallyBytesReceived = 0;
 		_fileLength = 0;
 	}
@@ -37,6 +39,31 @@ public:
 		if (!_socket->setSendTimeOut(_timeOut >> 2)) return false;	//(/4)
 																	//try to set system buffer size = _bufLen
 		if (!_socket->setSendBufferSize(_bufLen)) return  false;
+	}
+	ostream& outFileInfo(ostream& stream)
+	{
+		stream << "file name: ", _fileName;
+		stream << endl << "file size: ", _fileLength;
+		stream << endl;
+		return stream;
+	}
+	void trackSendPercent()
+	{
+		int loadingPercent = percentOfLoading(_totallyBytesSend);
+		cout << (int)loadingPercent << "%" << endl;
+		//send OOB_byte
+		_socket->send_OOB_byte(loadingPercent);
+	}
+	void trackReceivePercent()
+	{
+		char loadingPercent = 0;
+		_socket->recv_OOB_byte(loadingPercent);
+		cout << (int)loadingPercent << "%" << endl;
+
+	}
+	char percentOfLoading(int bytesWrite)
+	{
+		return (char)(((double)bytesWrite / _fileLength) * 100);
 	}
 	bool send(string& fileName)
 	{
@@ -50,6 +77,8 @@ public:
 		}
 		else
 			_socket->sendConfirm();
+
+		outFileInfo(cout);
 
 		setupSendingSocket();
 		//real system buffer size
@@ -83,6 +112,10 @@ public:
 				if (bytesWrite == SOCKET_ERROR)
 					throw runtime_error("connection is lost");
 
+				_totallyBytesSend += bytesWrite;
+				//send OOB byte with loading percent value
+				trackSendPercent();
+
 				if (_rdFile.eof())
 				{
 					//timeOut / 2
@@ -97,6 +130,7 @@ public:
 						throw runtime_error("connection is lost");
 
 				}
+				//send OOB byte
 			}
 			catch (exception e)
 			{
@@ -123,6 +157,8 @@ public:
 		if (!_wrFile.is_open())
 			//can't create file
 			return false;
+
+		outFileInfo(cout);
 
 		//size of data portion
 		if (!_socket->receive(_bufLen)) return false;
@@ -152,6 +188,8 @@ public:
 				//file writing
 				_wrFile.write(_buffer.data(), bytesRead);
 				_totallyBytesReceived += bytesRead;
+				//recv OOB byte with loading percent value
+				trackReceivePercent();
 
 				//end of transmittion check
 				if (_totallyBytesReceived == _fileLength)

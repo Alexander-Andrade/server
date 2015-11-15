@@ -23,13 +23,24 @@ private:
 	//totaly number of bytes accurately received
 	int _totallyBytesReceived;
 public:
-	FileWorker(Socket* socket, string& fileName, std::function<Socket*(int)>& tryToReconnect, int bufLen, int timeOut) : _bufLen(bufLen), _timeOut(timeOut)
+	FileWorker(Socket* socket, std::function<Socket*(int)>& tryToReconnect, int bufLen, int timeOut) : _bufLen(bufLen), _timeOut(timeOut)
 	{
-		init(socket, fileName, tryToReconnect);
-	}
+		_socket = socket;
+		_tryToReconnect = tryToReconnect;
 
-	bool send()
+		_totallyBytesReceived = 0;
+		_fileLength = 0;
+	}
+	bool setupSendingSocket()
 	{
+		//send timeout less than receive timeout
+		if (!_socket->setSendTimeOut(_timeOut >> 2)) return false;	//(/4)
+																	//try to set system buffer size = _bufLen
+		if (!_socket->setSendBufferSize(_bufLen)) return  false;
+	}
+	bool send(string& fileName)
+	{
+		_fileName = fileName;
 		_rdFile.open(_fileName, ios::in | ios::binary);
 		//file existance check
 		if (!_rdFile.is_open())
@@ -40,6 +51,9 @@ public:
 		else
 			_socket->sendConfirm();
 
+		setupSendingSocket();
+		//real system buffer size
+		_bufLen = _socket->getSendBufferSize();
 		//total size of the transmitting file
 		_fileLength = getFileLength(_rdFile);
 
@@ -48,10 +62,11 @@ public:
 		if (!_socket->send(_timeOut)) return  false;
 		if (!_socket->send(_fileLength)) return false;
 
+		if (_buffer.size() < _bufLen)
+			_buffer.resize(_bufLen);
+
 		int fileByteRead = 0;
 		int bytesWrite = 0;
-
-		_socket->makeUnblocked();
 
 		while (true)
 		{
@@ -63,9 +78,6 @@ public:
 				if (!_rdFile.eof() && _bufLen != fileByteRead)
 					return false;
 
-				//async buffer transmitting
-				if (!_socket->select(Socket::Selection::WriteCheck, _timeOut))
-					throw runtime_error("connection is lost");
 				bytesWrite = _socket->send(_buffer.data(), fileByteRead);
 
 				if (bytesWrite == SOCKET_ERROR)
@@ -73,39 +85,39 @@ public:
 
 				if (_rdFile.eof())
 				{
-					//waiting _timeOut / 2 
-					if (!_socket->select(Socket::Selection::WriteCheck, _timeOut >> 1))
-						throw runtime_error("connection is lost");
+					//timeOut / 2
+					_socket->setSendTimeOut(_timeOut >> 1);
 					//check bytes that client has received
 					_socket->receive(_totallyBytesReceived);
+					_socket->setSendTimeOut(_timeOut);
 
 					if (_totallyBytesReceived == _fileLength)
 						break;
 					else
 						throw runtime_error("connection is lost");
+
 				}
 			}
 			catch (exception e)
 			{
 				if (!tryToRestoreConnectionFromTransmittingSide()) break;
-				_socket->makeUnblocked();
 			}
 		}
 
 		_rdFile.close();
-		_socket->makeBlocked();
+		_socket->disableSendTimeOut();
 		return true;
 	}
 
-	bool receive()
+	bool receive(string& fileName)
 	{
+		_fileName = fileName;
 		//waiting for acknowledge
 		if (!_socket->receiveAck())
 		{//there is no such file
 			cout << "there is no such file" << endl;
 			return false;
 		}
-		
 		_wrFile.open(_fileName, ios::out | ios::trunc | ios::binary);
 
 		if (!_wrFile.is_open())
@@ -117,20 +129,23 @@ public:
 		if (!_socket->receive(_timeOut)) return false;
 		if (!_socket->receive(_fileLength)) return false;
 
+		if (_buffer.size() < _bufLen)
+			_buffer.resize(_bufLen);
+
+		_socket->setReceiveTimeOut(_timeOut);
+
 		int bytesRead = 0;
 
-		_socket->makeUnblocked();
 		//file writing
 		while (true)
 		{
 			try
 			{
-
-				_socket->select(Socket::Selection::ReadCheck, _timeOut);
 				bytesRead = _socket->receive(_buffer.data(), _bufLen);
 
 				if (bytesRead == SOCKET_ERROR)
 					throw runtime_error("connection is lost");
+
 				else if (bytesRead == 0)
 					//connection close
 					break;
@@ -142,7 +157,6 @@ public:
 				if (_totallyBytesReceived == _fileLength)
 				{//file uploaded
 				 //transmit to server bytes number that has received
-					_socket->select(Socket::Selection::WriteCheck, _timeOut);
 					_socket->send(_totallyBytesReceived);
 					break;
 				}
@@ -150,12 +164,11 @@ public:
 			catch (exception e)
 			{
 				if (!tryToRestoreConnectionFromReceivingSide()) break;
-				_socket->makeUnblocked();
 			}
 		}
 
 		_wrFile.close();
-		_socket->makeBlocked();
+		_socket->disableReceiveTimeOut();
 		return _fileLength == _totallyBytesReceived;
 	}
 
@@ -168,9 +181,8 @@ private:
 			_wrFile.close();
 			return false;
 		}
-
-		_socket->send(_totallyBytesReceived);
-		return true;
+		_socket->setReceiveTimeOut(_timeOut);
+		return _socket->send(_totallyBytesReceived);
 	}
 
 	bool tryToRestoreConnectionFromTransmittingSide()
@@ -181,6 +193,7 @@ private:
 			return false;
 		}
 
+		setupSendingSocket();
 		//get bytes number that client managed to get
 		_socket->receive(_totallyBytesReceived);
 
@@ -189,18 +202,6 @@ private:
 		if (_rdFile.eof())
 			_rdFile.clear();
 		return true;
-	}
-
-	void init(Socket* socket, string& fileName, std::function<Socket*(int)>& tryToReconnect)
-	{
-		_socket = socket;
-		_fileName = fileName;
-		_tryToReconnect = tryToReconnect;
-
-		_totallyBytesReceived = 0;
-		_fileLength = 0;
-		_buffer.resize(_bufLen);
-
 	}
 
 	static int getFileLength(std::ifstream& file)
@@ -296,15 +297,15 @@ protected:
 	bool sendFile(Socket* socket, string& message, std::function<Socket*(int)> tryToReconnect)
 	{
 		string fileName = getFirstPatternedSubstring(message, "[A-Za-z0-9]+.[A-Za-z0-9]+");
-		FileWorker fileWorker(socket, fileName, tryToReconnect, _bufLen, _timeOut);
-		return fileWorker.send();
+		FileWorker fileWorker(socket, tryToReconnect, _bufLen, _timeOut);
+		return fileWorker.send(fileName);
 	}
 
 	bool receiveFile(Socket* socket, string& message, std::function<Socket*(int)> tryToReconnect)
 	{
 		string fileName = getFirstPatternedSubstring(message, "[A-Za-z0-9]+.[A-Za-z0-9]+");
-		FileWorker fileWorker(socket, fileName, tryToReconnect, _bufLen, _timeOut);
-		return fileWorker.receive();
+		FileWorker fileWorker(socket, tryToReconnect, _bufLen, _timeOut);
+		return fileWorker.receive(fileName);
 	}
 
 	template<typename T>

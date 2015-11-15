@@ -42,8 +42,8 @@ public:
 	}
 	ostream& outFileInfo(ostream& stream)
 	{
-		stream << "file name: ", _fileName;
-		stream << endl << "file size: ", _fileLength;
+		stream << "file name: " << _fileName;
+		stream << endl << "file size: " << _fileLength;
 		stream << endl;
 		return stream;
 	}
@@ -53,18 +53,13 @@ public:
 		int delta = 0;
 		if (loadingPercent != prevPercent)
 		{
-			//show milestones
-			if (loadingPercent % milestone == 0)
-				cout << (int)loadingPercent << " ";
-			else
-			{
-				delta = loadingPercent - prevPercent;
-				for (int i = 0;i < delta;i++)
-					cout << '.';
-			}
+			delta = loadingPercent - prevPercent;
+			for (int i = 0;i < delta;i++)
+				cout << '.';
 			//it needless to show the same percent value
 			prevPercent = loadingPercent;
 		}
+		return stream;
 	}
 	void trackSendPercent()
 	{

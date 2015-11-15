@@ -42,7 +42,7 @@ public:
 	}
 	ostream& outFileInfo(ostream& stream)
 	{
-		stream << "file name: " << _fileName;
+		stream <<endl<< "file name: " << _fileName;
 		stream << endl << "file size: " << _fileLength;
 		stream << endl;
 		return stream;
@@ -90,8 +90,6 @@ public:
 		else
 			_socket->sendConfirm();
 
-		outFileInfo(cout);
-
 		setupSendingSocket();
 		//real system buffer size
 		_bufLen = _socket->getSendBufferSize();
@@ -108,6 +106,8 @@ public:
 
 		int fileByteRead = 0;
 		int bytesWrite = 0;
+
+		outFileInfo(cout);
 
 		while (true)
 		{
@@ -170,8 +170,6 @@ public:
 			//can't create file
 			return false;
 
-		outFileInfo(cout);
-
 		//size of data portion
 		if (!_socket->receive(_bufLen)) return false;
 		if (!_socket->receive(_timeOut)) return false;
@@ -183,6 +181,8 @@ public:
 		_socket->setReceiveTimeOut(_timeOut);
 
 		int bytesRead = 0;
+
+		outFileInfo(cout);
 
 		//file writing
 		while (true)

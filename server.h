@@ -9,15 +9,17 @@ private:
 	unique_ptr<ServerSocket> _serverSocket;
 	unique_ptr<Socket> _contactSocket;
 	    
+	unique_ptr<UDP_ServerSocket> _udpServerSocket;
 	std::queue<int> _clients;
 public:
 	Server(char* nodeName, char* serviceName, int nConnections = 5, int sendBufLen = 1024, int timeOut = 30) : Connection(sendBufLen,timeOut)
 	{//ethernet frame = 1460 bytes
 		_serverSocket.reset(new ServerSocket(nodeName,serviceName, nConnections));
 		_contactSocket = nullptr;
-		
+
+		_udpServerSocket.reset(new UDP_ServerSocket(nodeName, serviceName));
+
 		fillCommandMap();
-		
 	}
    
 	void workWithClients()
@@ -75,6 +77,24 @@ protected:
 		retVal ? _contactSocket->sendMessage("file uploaded\n") : _contactSocket->sendMessage("fail to upload the file\n");
 		return retVal;
 	}
+
+	bool sendFileUdp(string& message)
+	{
+		bool retVal = Connection::sendFile(_udpServerSocket.get(), message, std::bind(&Server::tryToReconnect, this, std::placeholders::_1));
+
+		_contactSocket->receiveAck();
+
+		retVal ? _contactSocket->sendMessage("file downloaded\n") : _contactSocket->sendMessage("fail to download the file\n");
+		return retVal;
+	}
+
+	bool receiveFileUdp(string& message)
+	{
+		bool retVal = Connection::receiveFile(_udpServerSocket.get(), message, std::bind(&Server::tryToReconnect, this, std::placeholders::_1));
+		retVal ? _contactSocket->sendMessage("file uploaded\n") : _contactSocket->sendMessage("fail to upload the file\n");
+		return retVal;
+	}
+
 	void registerNewClient(int clientId)
 	{
 		if (_clients.size() == 2)
@@ -150,6 +170,8 @@ protected:
 		
 		_commandMap[string("download")] = std::bind(&Server::sendFile, this, std::placeholders::_1);
 		_commandMap[string("upload")] = std::bind(&Server::receiveFile, this, std::placeholders::_1);
+		_commandMap[string("download_udp")] = std::bind(&Server::sendFileUdp, this, std::placeholders::_1);
+		_commandMap[string("upload_udp")] = std::bind(&Server::receiveFileUdp, this, std::placeholders::_1);
 	}
 
 

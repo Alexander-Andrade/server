@@ -100,13 +100,23 @@ public:
 	}
 	ostream& showPercents(ostream& stream, int loadingPercent, int milestone, char placeholder)
 	{
-		static int totalPercent = 1;
+		static int totalPercent = 0;
 
-		for (int i = totalPercent;i <= loadingPercent;i++)
+		if (!loadingPercent) return stream;
+		//skip zeros
+		int i = totalPercent;
+		if (i == 0) i++;
+		for (i; i < loadingPercent; i++)
 			if (i % milestone == 0)
 				stream << i << endl;
 			else
 				stream << placeholder;
+
+		if (loadingPercent == 100)
+		{
+			stream << loadingPercent << endl;
+			totalPercent = 0;
+		}
 
 		totalPercent += loadingPercent - totalPercent;
 		return stream;

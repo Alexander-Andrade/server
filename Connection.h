@@ -23,8 +23,14 @@ private:
 	//totaly number of bytes accurately received
 	int _totallyBytesReceived;
 	int _totallyBytesSend;
+
+	//UDP packet control
+	vector<int> _trackedDatagrams;
+	//received by receiver
+	vector<int> _receivedDatagrams;
+	int _nPacks;
 public:
-	FileWorker(Socket* socket, std::function<Socket*(int)>& tryToReconnect, int bufLen, int timeOut) : _bufLen(bufLen), _timeOut(timeOut)
+	FileWorker(Socket* socket, std::function<Socket*(int)>& tryToReconnect, int bufLen, int timeOut,int nPacks = 4) : _bufLen(bufLen), _timeOut(timeOut)
 	{
 		_socket = socket;
 		_tryToReconnect = tryToReconnect;
@@ -32,7 +38,52 @@ public:
 		_totallyBytesReceived = 0;
 		_totallyBytesReceived = 0;
 		_fileLength = 0;
+
+		if (_socket->protocol() == IPPROTO_UDP)
+		{
+			_nPacks = nPacks;
+			_trackedDatagrams.reserve(_nPacks);
+			_receivedDatagrams.reserve(_nPacks);
+		}
 	}
+
+	void trackSendingDatagrams()
+	{
+		if (_trackedDatagrams.size() < _nPacks)
+		{
+			_trackedDatagrams.push_back(_totallyBytesSend);
+			return ;
+		}
+		_socket->setReceiveTimeOut(_timeOut >> 1);
+
+		_receivedDatagrams.resize(_nPacks);
+		int recvRealSize = _socket->receive(_receivedDatagrams.data(),_receivedDatagrams.size());
+		if (recvRealSize != _trackedDatagrams.size())
+		{
+			_receivedDatagrams.clear();
+			_trackedDatagrams.clear();
+			throw runtime_error("connection is lost");
+		}
+		//compare local and remote
+		int areEqual = std::equal(_receivedDatagrams.begin(), _receivedDatagrams.end(), _trackedDatagrams);
+		_receivedDatagrams.clear();
+		_trackedDatagrams.clear();
+		
+		if (!areEqual) 
+			throw runtime_error("connection is lost");
+	}
+
+	void trackReceivingDatagrams()
+	{
+		if (_receivedDatagrams.size() < _nPacks)
+			_receivedDatagrams.push_back(_totallyBytesReceived);
+		else
+		{
+			_socket->send(_receivedDatagrams.data(), _receivedDatagrams.size());
+			_receivedDatagrams.clear();
+		}
+	}
+
 	bool setupSendingSocket()
 	{
 		//send timeout less than receive timeout
@@ -125,6 +176,9 @@ public:
 					throw runtime_error("connection is lost");
 
 				_totallyBytesSend += bytesWrite;
+
+				if (_socket->protocol() == IPPROTO_UDP)
+					trackSendingDatagrams();
 				//send OOB byte with loading percent value
 				if (_socket->protocol() == IPPROTO_TCP)
 					trackSendPercent();
@@ -134,7 +188,7 @@ public:
 					//timeOut / 2
 					_socket->setSendTimeOut(_timeOut >> 1);
 					//check bytes that client has received
-					_socket->receive(_totallyBytesReceived);
+					_socket->receive(_totallyBytesReceived); 
 					_socket->setSendTimeOut(_timeOut);
 
 					if (_totallyBytesReceived == _fileLength)
@@ -198,7 +252,11 @@ public:
 					break;
 				//file writing
 				_wrFile.write(_buffer.data(), bytesRead);
+
 				_totallyBytesReceived += bytesRead;
+
+				if (_socket->protocol() == IPPROTO_UDP)
+					trackReceivingDatagrams();
 				//recv OOB byte with loading percent value
 				if (_socket->protocol() == IPPROTO_TCP)
 					trackReceivePercent();

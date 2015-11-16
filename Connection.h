@@ -42,7 +42,7 @@ public:
 	}
 	ostream& outFileInfo(ostream& stream)
 	{
-		stream <<endl<< "file name: " << _fileName;
+		stream << endl << "file name: " << _fileName;
 		stream << endl << "file size: " << _fileLength;
 		stream << endl;
 		return stream;
@@ -126,7 +126,8 @@ public:
 
 				_totallyBytesSend += bytesWrite;
 				//send OOB byte with loading percent value
-				trackSendPercent();
+				if (_socket->type() == Socket::Type::TCP)
+					trackSendPercent();
 
 				if (_rdFile.eof())
 				{
@@ -181,9 +182,7 @@ public:
 		_socket->setReceiveTimeOut(_timeOut);
 
 		int bytesRead = 0;
-
 		outFileInfo(cout);
-
 		//file writing
 		while (true)
 		{
@@ -201,7 +200,8 @@ public:
 				_wrFile.write(_buffer.data(), bytesRead);
 				_totallyBytesReceived += bytesRead;
 				//recv OOB byte with loading percent value
-				trackReceivePercent();
+				if (_socket->type() == Socket::Type::TCP)
+					trackReceivePercent();
 
 				//end of transmittion check
 				if (_totallyBytesReceived == _fileLength)

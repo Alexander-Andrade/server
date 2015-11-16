@@ -617,7 +617,7 @@ protected:
 	}
 
 	void attachServerSocket_() { if (!attachServerSocket()) socketError("fail to attach to the port"); }
-
+public:
 	virtual bool attachClientSocket()
 	{
 
@@ -636,7 +636,7 @@ protected:
 		//если не подключились к серверу
 		return _handle != INVALID_SOCKET;
 	}
-
+protected:
 	void attachClientSocket_() { if (!attachClientSocket()) socketError("Unable to connect to server"); }
 
 	//------------------------ закрытие объекта--------------------------------------//
@@ -796,8 +796,6 @@ public:
 
 		attachServerSocket_();
 	}
-
-private:
 	
 	int recveive(char* buffer, int length, int flags) override
 	{
@@ -851,8 +849,6 @@ public:
 
 		attachClientSocket_();
 	}
-
-private:
 
 	bool attachClientSocket() override
 	{

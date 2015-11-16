@@ -858,9 +858,11 @@ public:
 			if (socket(ptr))
 			{
 				_pServAddr = ptr;
-				break;
+				return true;
 			}
 		}
+
+		return false;
 	}
 
 	int raw_receive(char* buffer, int length, int flags) override

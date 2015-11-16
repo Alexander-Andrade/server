@@ -80,7 +80,11 @@ protected:
 
 	bool sendFileUdp(string& message)
 	{
-		bool retVal = Connection::sendFile(_udpServerSocket.get(), message, std::bind(&Server::tryToReconnect, this, std::placeholders::_1));
+		//get client address
+		char arg;
+		_udpServerSocket->receive<char>(arg);
+
+		bool retVal = Connection::sendFile(_udpServerSocket.get(), message, std::bind(&Server::tryToReconnectUdp, this, std::placeholders::_1));
 
 		_contactSocket->receiveAck();
 
@@ -90,7 +94,11 @@ protected:
 
 	bool receiveFileUdp(string& message)
 	{
-		bool retVal = Connection::receiveFile(_udpServerSocket.get(), message, std::bind(&Server::tryToReconnect, this, std::placeholders::_1));
+		//get client address
+		char arg;
+		_udpServerSocket->receive<char>(arg);
+
+		bool retVal = Connection::receiveFile(_udpServerSocket.get(), message, std::bind(&Server::tryToReconnectUdp, this, std::placeholders::_1));
 		retVal ? _contactSocket->sendMessage("file uploaded\n") : _contactSocket->sendMessage("fail to upload the file\n");
 		return retVal;
 	}
@@ -135,6 +143,23 @@ protected:
 		if (_clients.front() == _clients.back())
 			return _contactSocket.get();
 	
+		return nullptr;
+	}
+
+	Socket* tryToReconnectUdp(int timeOut)
+	{
+		_udpServerSocket->setReceiveTimeOut(timeOut);
+		//wait for client id (and client address)
+		int clientId = 0;
+		_udpServerSocket->receive<int>(clientId);
+		registerNewClient(clientId);
+
+		_udpServerSocket->disableReceiveTimeOut();
+
+		//check if old client
+		if (_clients.front() == _clients.back())
+			return _udpServerSocket.get();
+
 		return nullptr;
 	}
 

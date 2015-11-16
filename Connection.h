@@ -296,7 +296,7 @@ protected:
 	bool catchCommand(string request)
 	{
 		//identifies command from request
-		string command = cutSuitableSubstring(request, "[A-Za-z0-9]+");
+		string command = cutSuitableSubstring(request, "[A-Za-z0-9_]+");
 		//check command
 		if (checkCommandExistance(command))
 		{

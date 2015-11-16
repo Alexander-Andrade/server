@@ -604,7 +604,7 @@ protected:
 	virtual bool attachServerSocket()
 	{
 		addrinfo* ptr;
-		for (ptr = _result; ptr != NULL; ptr->ai_next)
+		for (ptr = _result; ptr != NULL;ptr = ptr->ai_next)
 		{
 			if (!socket(ptr))
 				continue;
@@ -790,7 +790,7 @@ public:
 	{
 		getAddrInfo_(AF_UNSPEC,	//allow IPv4,IPv6
 			SOCK_DGRAM,	//datagram socket
-			IPPROTO_UDP,
+			0,
 			AI_PASSIVE
 			);
 

@@ -51,6 +51,7 @@ struct InetAddress
 class Socket
 {
 public:
+	enum class Type { TCP, UDP };
 	enum class Selection { ReadCheck, WriteCheck, ExceptCheck };
 protected:
 	//socket handle
@@ -63,10 +64,10 @@ protected:
 	//specified in order to narrow the list of addresses returned.
 	addrinfo _hints;
 	/*
-	 The use of the SOCKADDR_STORAGE structure promotes protocol-family
-	 and protocol-version independence, and simplifies development.
-	 It is recommended that the SOCKADDR_STORAGE structure be used in place
-	 of the sockaddr structure.
+	The use of the SOCKADDR_STORAGE structure promotes protocol-family
+	and protocol-version independence, and simplifies development.
+	It is recommended that the SOCKADDR_STORAGE structure be used in place
+	of the sockaddr structure.
 	*/
 	//for UDP
 	sockaddr_storage _peerAddr;
@@ -74,6 +75,9 @@ protected:
 
 	//address socket connected to (not localmashine)
 	InetAddress _inetAddress;
+
+	//socket type
+	Type _type;
 
 	u_long _keepAliveTimeOut;
 	u_long _keepAliveInterval;
@@ -103,8 +107,11 @@ public:
 	const std::string& IP()const { return _inetAddress.IP; }
 	const std::string& port()const { return _inetAddress.port; }
 
+	const Type type()const { return _type; }
+
 	u_long keepAliveTimeOut()const { return _keepAliveTimeOut; }
 	u_long keepAliveInterval()const { return _keepAliveInterval; }
+
 
 	void resetHande() { _handle = INVALID_SOCKET; }
 	//дескриптор сокета
@@ -158,7 +165,7 @@ public:
 	{
 		return ::send(_handle, buffer, length, flags);
 	}
-	
+
 	int send(const char* buffer, int length)
 	{
 		int flags = 0;
@@ -201,7 +208,7 @@ public:
 	{
 		return raw_receive(buffer, length, 0);
 	}
-	
+
 
 	template<typename T>
 	bool send(T& obj)
@@ -492,6 +499,8 @@ protected:
 		//IP-portNo
 		_inetAddress.IP = IP;
 		_inetAddress.port = port;
+		//socket type
+		_type = Type::TCP;
 	}
 	template<typename T>
 	bool setSockOpt(int level, int optname, T optval)
@@ -604,7 +613,7 @@ protected:
 	virtual bool attachServerSocket()
 	{
 		addrinfo* ptr;
-		for (ptr = _result; ptr != NULL;ptr = ptr->ai_next)
+		for (ptr = _result; ptr != NULL; ptr = ptr->ai_next)
 		{
 			if (!socket(ptr))
 				continue;
@@ -735,6 +744,7 @@ public:
 
 		attachServerSocket_();
 		listen_();
+		_type = Type::TCP;
 	}
 
 	Socket* accept()
@@ -760,7 +770,7 @@ public:
 	}
 
 private:
-	
+
 	bool listen()
 	{
 		//Now we can start listening (allowing as many connections as possible to
@@ -790,18 +800,19 @@ public:
 	{
 		getAddrInfo_(AF_UNSPEC,	//allow IPv4,IPv6
 			SOCK_DGRAM,	//datagram socket
-			0,
+			IPPROTO_UDP,
 			AI_PASSIVE
 			);
 
 		attachServerSocket_();
+		_type = Type::UDP;
 	}
-	
+
 	int raw_receive(char* buffer, int length, int flags) override
 	{
 		return ::recvfrom(_handle, buffer, length, flags, (sockaddr*)&_peerAddr, &_peerAddrLen);
 	}
-	
+
 	int raw_send(const char* buffer, int length, int flags) override
 	{
 		return ::sendto(_handle, buffer, length, flags, (sockaddr*)&_peerAddr, _peerAddrLen);
@@ -827,6 +838,7 @@ public:
 			0);	//без флагов
 
 		attachClientSocket_();
+		_type = Type::TCP;
 	}
 
 
@@ -839,7 +851,7 @@ private:
 	UDP_ClientSocket(UDP_ClientSocket&);
 	UDP_ClientSocket& operator=(UDP_ClientSocket&);
 public:
-	UDP_ClientSocket(char* IP, char* port) : Socket(IP,port)
+	UDP_ClientSocket(char* IP, char* port) : Socket(IP, port)
 	{
 		getAddrInfo_(AF_UNSPEC,	//allow IPv4,IPv6
 			SOCK_DGRAM,	//datagram socket
@@ -848,6 +860,7 @@ public:
 			);
 
 		attachClientSocket_();
+		_type = Type::UDP;
 	}
 
 	bool attachClientSocket() override
@@ -861,13 +874,12 @@ public:
 				return true;
 			}
 		}
-
 		return false;
 	}
 
 	int raw_receive(char* buffer, int length, int flags) override
 	{
-		return ::recvfrom(_handle, buffer, length, flags, (sockaddr*)_pServAddr->ai_addr, &(*(int*)_pServAddr->ai_addrlen));
+		return ::recvfrom(_handle, buffer, length, flags, (sockaddr*)_pServAddr->ai_addr, (int*)&_pServAddr->ai_addrlen);
 	}
 
 	int raw_send(const char* buffer, int length, int flags) override

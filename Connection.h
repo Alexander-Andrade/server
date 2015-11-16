@@ -126,7 +126,7 @@ public:
 
 				_totallyBytesSend += bytesWrite;
 				//send OOB byte with loading percent value
-				if (_socket->type() == Socket::Type::TCP)
+				if (_socket->protocol() == IPPROTO_TCP)
 					trackSendPercent();
 
 				if (_rdFile.eof())
@@ -200,7 +200,7 @@ public:
 				_wrFile.write(_buffer.data(), bytesRead);
 				_totallyBytesReceived += bytesRead;
 				//recv OOB byte with loading percent value
-				if (_socket->type() == Socket::Type::TCP)
+				if (_socket->protocol() == IPPROTO_TCP)
 					trackReceivePercent();
 
 				//end of transmittion check

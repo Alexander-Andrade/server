@@ -42,7 +42,7 @@ protected:
 			string message = _contactSocket->receiveMessage();
 			if (message.empty()) break;
 	
-			if (!checkStringFormat(message, "( )*[A-Za-z0-9]+(( )+(.)+)?(\r\n|\n)"))
+			if (!checkStringFormat(message, "( )*[A-Za-z0-9_]+(( )+(.)+)?(\r\n|\n)"))
 			{  
                 std::string errorMessage = string("invalid command format \"") + message;
 				_contactSocket->sendMessage(errorMessage);

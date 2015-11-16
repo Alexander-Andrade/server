@@ -51,7 +51,6 @@ struct InetAddress
 class Socket
 {
 public:
-	enum class Type { TCP, UDP };
 	enum class Selection { ReadCheck, WriteCheck, ExceptCheck };
 protected:
 	//socket handle
@@ -75,9 +74,6 @@ protected:
 
 	//address socket connected to (not localmashine)
 	InetAddress _inetAddress;
-
-	//socket type
-	Type _type;
 
 	u_long _keepAliveTimeOut;
 	u_long _keepAliveInterval;
@@ -107,7 +103,9 @@ public:
 	const std::string& IP()const { return _inetAddress.IP; }
 	const std::string& port()const { return _inetAddress.port; }
 
-	const Type type()const { return _type; }
+	const int type()const { return _hints.ai_socktype; }
+	const int family()const {return _hints.ai_family;}
+	const int protocol()const { return _hints.ai_protocol; }
 
 	u_long keepAliveTimeOut()const { return _keepAliveTimeOut; }
 	u_long keepAliveInterval()const { return _keepAliveInterval; }
@@ -499,8 +497,6 @@ protected:
 		//IP-portNo
 		_inetAddress.IP = IP;
 		_inetAddress.port = port;
-		//socket type
-		_type = Type::TCP;
 	}
 	template<typename T>
 	bool setSockOpt(int level, int optname, T optval)
@@ -744,7 +740,6 @@ public:
 
 		attachServerSocket_();
 		listen_();
-		_type = Type::TCP;
 	}
 
 	Socket* accept()
@@ -805,7 +800,6 @@ public:
 			);
 
 		attachServerSocket_();
-		_type = Type::UDP;
 	}
 
 	int raw_receive(char* buffer, int length, int flags) override
@@ -838,7 +832,6 @@ public:
 			0);	//без флагов
 
 		attachClientSocket_();
-		_type = Type::TCP;
 	}
 
 
@@ -860,7 +853,6 @@ public:
 			);
 
 		attachClientSocket_();
-		_type = Type::UDP;
 	}
 
 	bool attachClientSocket() override

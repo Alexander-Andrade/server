@@ -46,6 +46,7 @@ protected:
 			{  
                 std::string errorMessage = string("invalid command format \"") + message;
 				_contactSocket->sendMessage(errorMessage);
+				continue;
 			}
 
 			if (!catchCommand(message))
@@ -152,6 +153,8 @@ protected:
 		//wait for client id (and client address)
 		int clientId = 0;
 		_udpServerSocket->receive<int>(clientId);
+		_udpServerSocket->send(clientId);
+
 		registerNewClient(clientId);
 
 		_udpServerSocket->disableReceiveTimeOut();

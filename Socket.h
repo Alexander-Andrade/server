@@ -216,7 +216,7 @@ public:
 	}
 
 	template<typename T>
-	bool send(T* arr,int size)
+	bool sendArray(T* arr,int size)
 	{
 		int length = size * sizeof(T);
 		return send((char*)arr, length);
@@ -230,7 +230,7 @@ public:
 	}
 
 	template<typename T>
-	bool receive(T* arr, int size)
+	bool receiveArray(T* arr, int size)
 	{
 		int length = size * sizeof(T);
 		return receive((char*)arr, length);

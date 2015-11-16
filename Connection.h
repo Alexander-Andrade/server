@@ -30,7 +30,7 @@ private:
 	vector<int> _receivedDatagrams;
 	int _nPacks;
 public:
-	FileWorker(Socket* socket, std::function<Socket*(int)>& tryToReconnect, int bufLen, int timeOut,int nPacks = 4) : _bufLen(bufLen), _timeOut(timeOut)
+	FileWorker(Socket* socket, std::function<Socket*(int)>& tryToReconnect, int bufLen, int timeOut,int nPacks = 1) : _bufLen(bufLen), _timeOut(timeOut)
 	{
 		_socket = socket;
 		_tryToReconnect = tryToReconnect;
@@ -57,15 +57,15 @@ public:
 		_socket->setReceiveTimeOut(_timeOut >> 1);
 
 		_receivedDatagrams.resize(_nPacks);
-		int recvRealSize = _socket->receive(_receivedDatagrams.data(),_receivedDatagrams.size());
+		int recvRealSize = _socket->receiveArray(_receivedDatagrams.data(),_receivedDatagrams.size());
 		if (recvRealSize != _trackedDatagrams.size())
 		{
 			_receivedDatagrams.clear();
 			_trackedDatagrams.clear();
-			throw runtime_error("connection is lost");
+			throw runtime_error("datagram error");
 		}
 		//compare local and remote
-		int areEqual = std::equal(_receivedDatagrams.begin(), _receivedDatagrams.end(), _trackedDatagrams);
+		int areEqual = std::equal(_receivedDatagrams.begin(), _receivedDatagrams.end(), _trackedDatagrams.begin(),_trackedDatagrams.end());
 		_receivedDatagrams.clear();
 		_trackedDatagrams.clear();
 		
@@ -79,7 +79,7 @@ public:
 			_receivedDatagrams.push_back(_totallyBytesReceived);
 		else
 		{
-			_socket->send(_receivedDatagrams.data(), _receivedDatagrams.size());
+			_socket->sendArray(_receivedDatagrams.data(), _receivedDatagrams.size());
 			_receivedDatagrams.clear();
 		}
 	}
@@ -173,7 +173,7 @@ public:
 				bytesWrite = _socket->send(_buffer.data(), fileByteRead);
 
 				if (bytesWrite == SOCKET_ERROR)
-					throw runtime_error("connection is lost");
+					throw runtime_error("send error");
 
 				_totallyBytesSend += bytesWrite;
 
@@ -309,6 +309,9 @@ private:
 
 		if (_rdFile.eof())
 			_rdFile.clear();
+
+		_totallyBytesSend = _totallyBytesReceived;
+
 		return true;
 	}
 

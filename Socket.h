@@ -154,7 +154,7 @@ public:
 	}
 
 	//---------------------------send data and messages---------------------------------//
-	virtual int send(const char* buffer, int length, int flags)
+	virtual int raw_send(const char* buffer, int length, int flags)
 	{
 		return ::send(_handle, buffer, length, flags);
 	}
@@ -165,12 +165,12 @@ public:
 #if defined(UNIX)
 		flags = MSG_NOSIGNAL;
 #endif
-		return send(buffer, length, flags);
+		return raw_send(buffer, length, flags);
 	}
 
 	int send_OOB_byte(char byte)
 	{
-		return send((char*)&byte, 1, MSG_OOB);
+		return raw_send((char*)&byte, 1, MSG_OOB);
 	}
 
 	bool sendMessage(string& message)
@@ -187,19 +187,19 @@ public:
 	}
 
 
-	virtual int recveive(char* buffer, int length, int flags)
+	virtual int raw_receive(char* buffer, int length, int flags)
 	{
 		return ::recv(_handle, buffer, length, flags);
 	}
 
 	int recv_OOB_byte(char& byte)
 	{
-		return recveive((char*)&byte, 1, MSG_OOB);
+		return raw_receive((char*)&byte, 1, MSG_OOB);
 	}
 
 	int receive(char* buffer, int length)
 	{
-		return recveive(buffer, length, 0);
+		return raw_receive(buffer, length, 0);
 	}
 	
 
@@ -797,12 +797,12 @@ public:
 		attachServerSocket_();
 	}
 	
-	int recveive(char* buffer, int length, int flags) override
+	int raw_receive(char* buffer, int length, int flags) override
 	{
 		return ::recvfrom(_handle, buffer, length, flags, (sockaddr*)&_peerAddr, &_peerAddrLen);
 	}
 	
-	int send(const char* buffer, int length, int flags) override
+	int raw_send(const char* buffer, int length, int flags) override
 	{
 		return ::sendto(_handle, buffer, length, flags, (sockaddr*)&_peerAddr, _peerAddrLen);
 	}
@@ -863,12 +863,12 @@ public:
 		}
 	}
 
-	int recveive(char* buffer, int length, int flags) override
+	int raw_receive(char* buffer, int length, int flags) override
 	{
 		return ::recvfrom(_handle, buffer, length, flags, (sockaddr*)_pServAddr->ai_addr, &(*(int*)_pServAddr->ai_addrlen));
 	}
 
-	int send(const char* buffer, int length, int flags) override
+	int raw_send(const char* buffer, int length, int flags) override
 	{
 		return ::sendto(_handle, buffer, length, flags, (sockaddr*)_pServAddr->ai_addr, _pServAddr->ai_addrlen);
 	}

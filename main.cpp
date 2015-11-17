@@ -9,7 +9,7 @@ int main(int argc,char* argv[])
 	{
 		Socket::initializeWinsock_();
 
-		Server server(argv[1],argv[2]);
+		Server server("192.168.1.2","7000");
 		server.workWithClients();
 		//some comments
 	}

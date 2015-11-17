@@ -9,15 +9,17 @@ private:
 	unique_ptr<ServerSocket> _serverSocket;
 	unique_ptr<Socket> _contactSocket;
 	    
+	unique_ptr<UDP_ServerSocket> _udpServerSocket;
 	std::queue<int> _clients;
 public:
-	Server(char* nodeName, char* serviceName, int nConnections = 5, int sendBufLen = 3000, int timeOut = 30) : Connection(sendBufLen,timeOut)
+	Server(char* nodeName, char* serviceName, int nConnections = 5, int sendBufLen = 1024, int timeOut = 30) : Connection(sendBufLen,timeOut)
 	{//ethernet frame = 1460 bytes
 		_serverSocket.reset(new ServerSocket(nodeName,serviceName, nConnections));
 		_contactSocket = nullptr;
-		
+
+		_udpServerSocket.reset(new UDP_ServerSocket(nodeName, serviceName));
+
 		fillCommandMap();
-		
 	}
    
 	void workWithClients()
@@ -40,10 +42,11 @@ protected:
 			string message = _contactSocket->receiveMessage();
 			if (message.empty()) break;
 	
-			if (!checkStringFormat(message, "( )*[A-Za-z0-9]+(( )+(.)+)?(\r\n|\n)"))
+			if (!checkStringFormat(message, "( )*[A-Za-z0-9_]+(( )+(.)+)?(\r\n|\n)"))
 			{  
                 std::string errorMessage = string("invalid command format \"") + message;
 				_contactSocket->sendMessage(errorMessage);
+				continue;
 			}
 
 			if (!catchCommand(message))
@@ -64,7 +67,7 @@ protected:
 	{
 		bool retVal = Connection::sendFile(_contactSocket.get(), message, std::bind(&Server::tryToReconnect, this, std::placeholders::_1));
 	  
-		getAck(*_contactSocket);
+		_contactSocket->receiveAck();
 	       
 		retVal ? _contactSocket->sendMessage("file downloaded\n") : _contactSocket->sendMessage("fail to download the file\n");
 		return retVal;
@@ -75,6 +78,32 @@ protected:
 		retVal ? _contactSocket->sendMessage("file uploaded\n") : _contactSocket->sendMessage("fail to upload the file\n");
 		return retVal;
 	}
+
+	bool sendFileUdp(string& message)
+	{
+		//get client address
+		char arg;
+		_udpServerSocket->receive<char>(arg);
+
+		bool retVal = Connection::sendFile(_udpServerSocket.get(), message, std::bind(&Server::tryToReconnectUdp, this, std::placeholders::_1));
+
+		_contactSocket->receiveAck();
+
+		retVal ? _contactSocket->sendMessage("file downloaded\n") : _contactSocket->sendMessage("fail to download the file\n");
+		return retVal;
+	}
+
+	bool receiveFileUdp(string& message)
+	{
+		//get client address
+		char arg;
+		_udpServerSocket->receive<char>(arg);
+
+		bool retVal = Connection::receiveFile(_udpServerSocket.get(), message, std::bind(&Server::tryToReconnectUdp, this, std::placeholders::_1));
+		retVal ? _contactSocket->sendMessage("file uploaded\n") : _contactSocket->sendMessage("fail to upload the file\n");
+		return retVal;
+	}
+
 	void registerNewClient(int clientId)
 	{
 		if (_clients.size() == 2)
@@ -101,7 +130,7 @@ protected:
 		if (!_serverSocket->makeUnblocked())
 			return nullptr;
 		//fcntl(_serverSocket->handle(),F_SETFL,O_NONBLOCK);
-		if (!_serverSocket->select(Socket::Selection::WriteCheck ,timeOut))
+		if (!_serverSocket->select(Socket::Selection::ReadCheck ,timeOut))
 		{	
 			_serverSocket->makeBlocked();
 			return nullptr ;
@@ -115,6 +144,25 @@ protected:
 		if (_clients.front() == _clients.back())
 			return _contactSocket.get();
 	
+		return nullptr;
+	}
+
+	Socket* tryToReconnectUdp(int timeOut)
+	{
+		_udpServerSocket->setReceiveTimeOut(timeOut);
+		//wait for client id (and client address)
+		int clientId = 0;
+		_udpServerSocket->receive<int>(clientId);
+		_udpServerSocket->send(clientId);
+
+		registerNewClient(clientId);
+
+		_udpServerSocket->disableReceiveTimeOut();
+
+		//check if old client
+		if (_clients.front() == _clients.back())
+			return _udpServerSocket.get();
+
 		return nullptr;
 	}
 
@@ -150,6 +198,8 @@ protected:
 		
 		_commandMap[string("download")] = std::bind(&Server::sendFile, this, std::placeholders::_1);
 		_commandMap[string("upload")] = std::bind(&Server::receiveFile, this, std::placeholders::_1);
+		_commandMap[string("download_udp")] = std::bind(&Server::sendFileUdp, this, std::placeholders::_1);
+		_commandMap[string("upload_udp")] = std::bind(&Server::receiveFileUdp, this, std::placeholders::_1);
 	}
 
 

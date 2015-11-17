@@ -3,31 +3,359 @@
 
 #include "Socket.h"
 
+class FileWorker
+{
+private:
+	//file r/w buffer
+	vector<char> _buffer;
+	int _timeOut;
+	int _bufLen;
+
+	//socket refs
+	Socket* _socket;
+	std::function<Socket*(int)> _tryToReconnect;
+	string _fileName;
+	int _fileLength;
+
+	std::ifstream _rdFile;
+	std::ofstream _wrFile;
+
+	//totaly number of bytes accurately received
+	int _totallyBytesReceived;
+	int _totallyBytesSend;
+
+	//UDP packet control
+	vector<int> _trackedDatagrams;
+	//received by receiver
+	vector<int> _receivedDatagrams;
+	int _nPacks;
+public:
+	FileWorker(Socket* socket, std::function<Socket*(int)>& tryToReconnect, int bufLen, int timeOut,int nPacks = 1) : _bufLen(bufLen), _timeOut(timeOut)
+	{
+		_socket = socket;
+		_tryToReconnect = tryToReconnect;
+
+		_totallyBytesReceived = 0;
+		_totallyBytesReceived = 0;
+		_fileLength = 0;
+
+		if (_socket->protocol() == IPPROTO_UDP)
+		{
+			_nPacks = nPacks;
+			_trackedDatagrams.reserve(_nPacks);
+			_receivedDatagrams.reserve(_nPacks);
+		}
+	}
+
+	void trackSendingDatagrams()
+	{
+		if (_trackedDatagrams.size() < _nPacks)
+		{
+			_trackedDatagrams.push_back(_totallyBytesSend);
+			return ;
+		}
+		_socket->setReceiveTimeOut(_timeOut >> 1);
+
+		_receivedDatagrams.resize(_nPacks);
+		int recvRealSize = _socket->receiveArray(_receivedDatagrams.data(),_receivedDatagrams.size());
+		if (recvRealSize != _trackedDatagrams.size())
+		{
+			_receivedDatagrams.clear();
+			_trackedDatagrams.clear();
+			throw runtime_error("datagram error");
+		}
+		//compare local and remote
+		int areEqual = std::equal(_receivedDatagrams.begin(), _receivedDatagrams.end(), _trackedDatagrams.begin(),_trackedDatagrams.end());
+		_receivedDatagrams.clear();
+		_trackedDatagrams.clear();
+		
+		if (!areEqual) 
+			throw runtime_error("connection is lost");
+	}
+
+	void trackReceivingDatagrams()
+	{
+		if (_receivedDatagrams.size() < _nPacks)
+			_receivedDatagrams.push_back(_totallyBytesReceived);
+		else
+		{
+			_socket->sendArray(_receivedDatagrams.data(), _receivedDatagrams.size());
+			_receivedDatagrams.clear();
+		}
+	}
+
+	bool setupSendingSocket()
+	{
+		//send timeout less than receive timeout
+		if (!_socket->setSendTimeOut(_timeOut >> 2)) return false;	//(/4)
+																	//try to set system buffer size = _bufLen
+		if (!_socket->setSendBufferSize(_bufLen)) return  false;
+	}
+	ostream& outFileInfo(ostream& stream)
+	{
+		stream << endl << "file name: " << _fileName;
+		stream << endl << "file size: " << _fileLength;
+		stream << endl;
+		return stream;
+	}
+	ostream& showPercents(ostream& stream, int loadingPercent, int milestone, char placeholder)
+	{
+		static int totalPercent = 0;
+
+		if (!loadingPercent) return stream;
+		//skip zeros
+		int i = totalPercent;
+		if (i == 0) i++;
+		for (i; i < loadingPercent; i++)
+			if (i % milestone == 0)
+				stream << i << endl;
+			else
+				stream << placeholder;
+
+		if (loadingPercent == 100)
+		{
+			stream << loadingPercent << endl;
+			totalPercent = 0;
+		}
+
+		totalPercent += loadingPercent - totalPercent;
+		return stream;
+	}
+	void trackSendPercent()
+	{
+		int loadingPercent = percentOfLoading(_totallyBytesSend);
+		showPercents(cout, loadingPercent, 20, '.');
+		//send OOB_byte
+		_socket->send_OOB_byte(loadingPercent);
+	}
+	void trackReceivePercent()
+	{
+		char loadingPercent = 0;
+		_socket->recv_OOB_byte(loadingPercent);
+		showPercents(cout, loadingPercent, 20, '.');
+	}
+	char percentOfLoading(int bytesWrite)
+	{
+		return (char)(((double)bytesWrite / _fileLength) * 100);
+	}
+	bool send(string& fileName)
+	{
+		_fileName = fileName;
+		_rdFile.open(_fileName, ios::in | ios::binary);
+		//file existance check
+		if (!_rdFile.is_open())
+		{
+			_socket->sendRefuse();
+			return false;
+		}
+		else
+			_socket->sendConfirm();
+
+		setupSendingSocket();
+		//real system buffer size
+		_bufLen = _socket->getSendBufferSize();
+		//total size of the transmitting file
+		_fileLength = getFileLength(_rdFile);
+
+		//send hint data to the receiver
+		if (!_socket->send(_bufLen)) return false;
+		if (!_socket->send(_timeOut)) return  false;
+		if (!_socket->send(_fileLength)) return false;
+
+		if (_buffer.size() < _bufLen)
+			_buffer.resize(_bufLen);
+
+		int fileByteRead = 0;
+		int bytesWrite = 0;
+
+		outFileInfo(cout);
+
+		while (true)
+		{
+			try
+			{
+				//file reading to buffer
+				_rdFile.read(_buffer.data(), _bufLen);
+				fileByteRead = _rdFile.gcount();
+				if (!_rdFile.eof() && _bufLen != fileByteRead)
+					return false;
+
+				bytesWrite = _socket->send(_buffer.data(), fileByteRead);
+
+				if (bytesWrite == SOCKET_ERROR)
+					throw runtime_error("send error");
+
+				_totallyBytesSend += bytesWrite;
+
+				if (_socket->protocol() == IPPROTO_UDP)
+					trackSendingDatagrams();
+				//send OOB byte with loading percent value
+				if (_socket->protocol() == IPPROTO_TCP)
+					trackSendPercent();
+
+				if (_rdFile.eof())
+				{
+					//timeOut / 2
+					_socket->setSendTimeOut(_timeOut >> 1);
+					//check bytes that client has received
+					_socket->receive(_totallyBytesReceived); 
+					_socket->setSendTimeOut(_timeOut);
+
+					if (_totallyBytesReceived == _fileLength)
+						break;
+					else
+						throw runtime_error("connection is lost");
+
+				}
+				//send OOB byte
+			}
+			catch (exception e)
+			{
+				if (!tryToRestoreConnectionFromTransmittingSide()) break;
+			}
+		}
+
+		_rdFile.close();
+		_socket->disableSendTimeOut();
+		return true;
+	}
+
+	bool receive(string& fileName)
+	{
+		_fileName = fileName;
+		//waiting for acknowledge
+		if (!_socket->receiveAck())
+		{//there is no such file
+			cout << "there is no such file" << endl;
+			return false;
+		}
+		_wrFile.open(_fileName, ios::out | ios::trunc | ios::binary);
+
+		if (!_wrFile.is_open())
+			//can't create file
+			return false;
+
+		//size of data portion
+		if (!_socket->receive(_bufLen)) return false;
+		if (!_socket->receive(_timeOut)) return false;
+		if (!_socket->receive(_fileLength)) return false;
+
+		if (_buffer.size() < _bufLen)
+			_buffer.resize(_bufLen);
+
+		_socket->setReceiveTimeOut(_timeOut);
+
+		int bytesRead = 0;
+		outFileInfo(cout);
+		//file writing
+		while (true)
+		{
+			try
+			{
+				bytesRead = _socket->receive(_buffer.data(), _bufLen);
+
+				if (bytesRead == SOCKET_ERROR)
+					throw runtime_error("connection is lost");
+
+				else if (bytesRead == 0)
+					//connection close
+					break;
+				//file writing
+				_wrFile.write(_buffer.data(), bytesRead);
+
+				_totallyBytesReceived += bytesRead;
+
+				if (_socket->protocol() == IPPROTO_UDP)
+					trackReceivingDatagrams();
+				//recv OOB byte with loading percent value
+				if (_socket->protocol() == IPPROTO_TCP)
+					trackReceivePercent();
+
+				//end of transmittion check
+				if (_totallyBytesReceived == _fileLength)
+				{//file uploaded
+				 //transmit to server bytes number that has received
+					_socket->send(_totallyBytesReceived);
+					break;
+				}
+			}
+			catch (exception e)
+			{
+				if (!tryToRestoreConnectionFromReceivingSide()) break;
+			}
+		}
+
+		_wrFile.close();
+		_socket->disableReceiveTimeOut();
+		return _fileLength == _totallyBytesReceived;
+	}
+
+private:
+
+	bool tryToRestoreConnectionFromReceivingSide()
+	{
+		if ((_socket = _tryToReconnect(_timeOut)) == nullptr)
+		{
+			_wrFile.close();
+			return false;
+		}
+		_socket->setReceiveTimeOut(_timeOut);
+		return _socket->send(_totallyBytesReceived);
+	}
+
+	bool tryToRestoreConnectionFromTransmittingSide()
+	{
+		if ((_socket = _tryToReconnect(_timeOut)) == nullptr)
+		{
+			_rdFile.close();
+			return false;
+		}
+
+		setupSendingSocket();
+		//get bytes number that client managed to get
+		_socket->receive(_totallyBytesReceived);
+
+		_rdFile.seekg(_totallyBytesReceived, ios::beg);
+
+		if (_rdFile.eof())
+			_rdFile.clear();
+
+		_totallyBytesSend = _totallyBytesReceived;
+
+		return true;
+	}
+
+	static int getFileLength(std::ifstream& file)
+	{
+		//cursor to the end of file
+		file.seekg(0, ios::end);
+		//get it position
+		int fileEndPos = file.tellg();
+		//cursor to the beginning
+		file.seekg(0, ios::beg);
+		//file length
+		return fileEndPos;
+	}
+
+};
+
+
 class Connection
 {
 	//contains mutual data end algorithms for server and client
 protected:
-	//file r/w buffer
-	vector<char> _buffer;
-
-	int _timeOut;
-	int _sendBufLen;
 	//comands and their functions map(dictionary)
 	//реализуемые этими командами (const char* -> std::function<void(string)>)
 	CommandMap _commandMap;
 
 	//id of the client or server
 	int _id;
-
-	//service packages confirm/refuse previous operation
-	static const string _confirmMessage;
-	static const string _refuseMessage;
-
+	int _bufLen;
+	int _timeOut;
 	virtual void fillCommandMap() = 0;
 
 public:
-	Connection(int sendBufLen, int timeOut) : _sendBufLen(sendBufLen),
-		_timeOut(timeOut)
+	Connection(int bufLen, int timeOut) : _bufLen(bufLen), _timeOut(timeOut)
 	{
 		_id = generateId<int>(0, std::numeric_limits<int>::max());
 	}
@@ -36,30 +364,15 @@ public:
 
 protected:
 
-	bool sendConfirm(Socket& s)
-	{//previos op confirmation
-		return s.sendMessage(const_cast<string&>(_confirmMessage));
-	}
-	bool sendRefuse(Socket& s)
-	{//previos op refutation
-		return s.sendMessage(const_cast<string&>(_refuseMessage));
-	}
-	bool getAck(Socket& s)
-	{//get confirm or refuse ->return true,false 
-		size_t pos = s.receiveMessage().find(_confirmMessage);
-		return  pos != string::npos ? true : false;
-	}
-
-
 	bool catchCommand(string request)
 	{
 		//identifies command from request
-		string command = cutSuitableSubstring(request, "[A-Za-z0-9]+");
+		string command = cutSuitableSubstring(request, "[A-Za-z0-9_]+");
 		//check command
 		if (checkCommandExistance(command))
-		{	
+		{
 			//command execution
-			_commandMap[command](request);		
+			_commandMap[command](request);
 			return true;
 		}
 		//there is no such command
@@ -84,7 +397,7 @@ protected:
 		std::regex regExp(pattern);
 		std::smatch matches;
 		std::regex_search(message, matches, regExp);
-	
+
 		string result = matches.empty() ? string("") : matches[0];
 		message = matches.suffix().str();
 
@@ -96,218 +409,24 @@ protected:
 		std::regex regExp(pattern);
 		std::smatch matches;
 		std::regex_search(message, matches, regExp);
-		
+
 		return matches.empty() ? string("") : matches[0];
 	}
 
 	//---------------------------------работа с файлами----------------------------------------//
-	int getFileLength(std::ifstream& file)
-	{
-
-		//cursor to the end of file
-		file.seekg(0, ios::end);
-		//get it position
-		int fileEndPos = file.tellg();
-		//cursor to the beginning
-		file.seekg(0, ios::beg);
-		//file length
-		return fileEndPos;
-	}
-
-
-	bool prepareSocketForDataTransmission(Socket* socket)
-	{
-		//set send timeout
-		if (!socket->setSendTimeOut(_timeOut >> 2)) return false;	//(/4)
-
-		if(!socket->setSendBufferSize(_sendBufLen)) return  false;
-
-	}
-
-	bool prepareClientForDataTransmission(Socket* socket,int bufferSize,int fileLength)
-	{
-		//send  sendBufferSize
-		if(!socket->send(bufferSize)) return false;
-		if(!socket->send(_timeOut)) return  false;
-		//send total file length
-		return socket->send(fileLength);
-	}
-
-	bool tryToRestoreConnectionFromTransmittingSide(Socket*& socket,std::ifstream& file,std::function<Socket*(int)>& tryToReconnect,int timeOut)
-	{
-		int clientBytesReceived = 0;
-
-		if ((socket = tryToReconnect(timeOut)) == nullptr)
-		{	   
-			file.close();
-			socket->disableSendTimeOut();
-			return false;
-		}
-
-		prepareSocketForDataTransmission(socket);
-		//get bytes number that client managed to get
-		socket->receive(clientBytesReceived);
-	
-		file.seekg(clientBytesReceived, ios::beg);
-
-		         
-		if (file.eof())
-			file.clear();
-		return true;
-	}
 
 	bool sendFile(Socket* socket, string& message, std::function<Socket*(int)> tryToReconnect)
-	{    
-		string fileName = getFirstPatternedSubstring(message, "[A-Za-z0-9]+.[A-Za-z0-9]+");  
-		std::ifstream file;
-		file.open(fileName, ios::in | ios::binary);
-
-		if (!file.is_open())
-		{  
-			sendRefuse(*socket);
-			return false;
-		}
-		else  
-			sendConfirm(*socket);
-
-		prepareSocketForDataTransmission(socket);
-		int bufLen = socket->getSendBufferSize();
-
-		int fileLength = getFileLength(file);
-
-		prepareClientForDataTransmission(socket,bufLen,fileLength);
-  
-		if (_buffer.size() < _sendBufLen)
-			_buffer.resize(_sendBufLen);
-		int fileByteRead = 0;
-		int bytesWrite = 0;
-		//position read from, when connection was failed
-		int clientBytesReceived = 0;
-     
-		while (true)
-		{
-			try { 
-				file.read(_buffer.data(), bufLen);
-				fileByteRead = file.gcount();
-				if (!file.eof() && bufLen != fileByteRead)
-					return false;
-
-				bytesWrite = socket->send(_buffer.data(), fileByteRead);
-
-				if (bytesWrite == SOCKET_ERROR)
-					throw runtime_error("connection is lost");
-
-				if (file.eof())
-				{
-					socket->setSendTimeOut(_timeOut >> 1);	//( timeout / 2 )
-					//check bytes that client has received
-					socket->receive(clientBytesReceived);
-					if (clientBytesReceived == fileLength)
-						break;
-					else
-					{
-						socket->setSendTimeOut(_timeOut);
-						throw runtime_error("connection is lost");
-					}
-				}
-			}
-			catch (exception e)
-			{
-				if(!tryToRestoreConnectionFromTransmittingSide(socket,file,tryToReconnect,_timeOut << 1)) break;
-			}
-		}
-
-		file.close();
-		socket->disableSendTimeOut();
-
-		return true;
-	}
-
-
-	bool tryToRestoreConnectionFromReceivingSide(Socket*& socket, std::ofstream& file, std::function<Socket*(int)>& tryToReconnect, int timeOut, int bytesReceived)
 	{
-		if ((socket = tryToReconnect(_timeOut)) == nullptr)
-		{
-			file.close();
-			socket->disableReceiveTimeOut();
-			return false;
-		}
-
-		socket->send(bytesReceived);
-		return socket->setReceiveTimeOut(_timeOut);
+		string fileName = getFirstPatternedSubstring(message, "[A-Za-z0-9]+.[A-Za-z0-9]+");
+		FileWorker fileWorker(socket, tryToReconnect, _bufLen, _timeOut);
+		return fileWorker.send(fileName);
 	}
 
 	bool receiveFile(Socket* socket, string& message, std::function<Socket*(int)> tryToReconnect)
 	{
-		//waiting for acknowledge
-		if (!getAck(*socket))
-		{//there is no such file
-			cout << "there is no such file" << endl;
-			return false;
-		}
-		//get file name
 		string fileName = getFirstPatternedSubstring(message, "[A-Za-z0-9]+.[A-Za-z0-9]+");
-		std::ofstream file;
-		file.open(fileName, ios::out | ios::trunc | ios::binary);
-
-		if (!file.is_open())
-			//can't create file
-			return false;
-
-		//size of data portion
-		int bufLen;
-		if (!socket->receive(bufLen)) return false;
-		int timeOut;
-		if (!socket->receive(timeOut)) return false;
-		//get file length
-		int fileLength;
-		if (!socket->receive(fileLength)) return false;
-
-		//set receive timeout
-		if (!socket->setReceiveTimeOut(timeOut)) return false;
-
-		if (_buffer.size() < bufLen)
-			_buffer.resize(bufLen);
-		int bytesRead = 0;
-
-		//realy received file length
-		int bytesReceived = 0;
-		//file writing
-		while (true)
-		{
-			try
-			{
-
-				//port reading
-				bytesRead = socket->receive(_buffer.data(), bufLen);
-
-				if (bytesRead == SOCKET_ERROR)
-					throw runtime_error("connection is lost");
-				else if (bytesRead == 0)
-					//connection close
-					break;
-				//file writing
-				file.write(_buffer.data(), bytesRead);
-				bytesReceived += bytesRead;
-
-				//end of transmittion check
-				if (bytesReceived == fileLength)
-				{//file uploaded
-				 //transmit to server bytes number that has received
-					socket->send(bytesReceived);
-					break;
-				}
-			}
-			catch (exception e)
-			{
-				if (!tryToRestoreConnectionFromReceivingSide(socket, file, tryToReconnect, timeOut << 1, bytesReceived)) break;
-			}
-		}
-
-		file.close();
-		socket->disableReceiveTimeOut();
-
-		return fileLength == bytesReceived;
+		FileWorker fileWorker(socket, tryToReconnect, _bufLen, _timeOut);
+		return fileWorker.receive(fileName);
 	}
 
 	template<typename T>
@@ -319,9 +438,5 @@ protected:
 		return distribution(generator);
 	}
 };
-
-//инициализация статических переменных
-const string Connection::_confirmMessage = "confirm";
-const string Connection::_refuseMessage = "refuse";
 
 #endif //CONNECTION_H

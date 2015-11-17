@@ -51,18 +51,31 @@ struct InetAddress
 class Socket
 {
 public:
-	enum class Selection { ReadCheck, WriteCheck };
+	enum class Selection { ReadCheck, WriteCheck, ExceptCheck };
 protected:
 	//socket handle
 	SOCKET _handle;
 	//The addrinfo structure is used by the getaddrinfo function to hold host address information.
 	addrinfo *_result;
-	
+	//for UDP server address
+	addrinfo* _pServAddr;
 	//The family, socktype and proto arguments can be optionally
 	//specified in order to narrow the list of addresses returned.
 	addrinfo _hints;
+	/*
+	The use of the SOCKADDR_STORAGE structure promotes protocol-family
+	and protocol-version independence, and simplifies development.
+	It is recommended that the SOCKADDR_STORAGE structure be used in place
+	of the sockaddr structure.
+	*/
+	//for UDP
+	sockaddr_storage _peerAddr;
+	static int _peerAddrLen;
+
 	//address socket connected to (not localmashine)
 	InetAddress _inetAddress;
+
+	int _protocol;
 
 	u_long _keepAliveTimeOut;
 	u_long _keepAliveInterval;
@@ -92,8 +105,11 @@ public:
 	const std::string& IP()const { return _inetAddress.IP; }
 	const std::string& port()const { return _inetAddress.port; }
 
+	const int protocol()const { return _protocol; }
+
 	u_long keepAliveTimeOut()const { return _keepAliveTimeOut; }
 	u_long keepAliveInterval()const { return _keepAliveInterval; }
+
 
 	void resetHande() { _handle = INVALID_SOCKET; }
 	//дескриптор сокета
@@ -143,6 +159,25 @@ public:
 	}
 
 	//---------------------------send data and messages---------------------------------//
+	virtual int raw_send(const char* buffer, int length, int flags)
+	{
+		return ::send(_handle, buffer, length, flags);
+	}
+
+	int send(const char* buffer, int length)
+	{
+		int flags = 0;
+#if defined(UNIX)
+		flags = MSG_NOSIGNAL;
+#endif
+		return raw_send(buffer, length, flags);
+	}
+
+	int send_OOB_byte(char byte)
+	{
+		return raw_send((char*)&byte, 1, MSG_OOB);
+	}
+
 	bool sendMessage(string& message)
 	{// sending message ends with \r\n
 		if (message.empty() || message.back() != '\n')
@@ -156,18 +191,22 @@ public:
 		return sendMessage(mes);
 	}
 
-	int send(const char* buffer, int length)
+
+	virtual int raw_receive(char* buffer, int length, int flags)
 	{
-		int flags = 0;
-#if defined(UNIX)
-		flags = MSG_NOSIGNAL;
-#endif
-		return ::send(_handle, buffer, length, flags);
+		return ::recv(_handle, buffer, length, flags);
 	}
+
+	int recv_OOB_byte(char& byte)
+	{
+		return raw_receive((char*)&byte, 1, MSG_OOB);
+	}
+
 	int receive(char* buffer, int length)
 	{
-		return recv(_handle, buffer, length, 0);
+		return raw_receive(buffer, length, 0);
 	}
+
 
 	template<typename T>
 	bool send(T& obj)
@@ -176,11 +215,42 @@ public:
 		return send((char *)&obj, length) == length;
 	}
 
+	template<typename T>
+	bool sendArray(T* arr,int size)
+	{
+		int length = size * sizeof(T);
+		return send((char*)arr, length);
+	}
+
 	template <typename T>
 	bool receive(T& obj)
 	{
 		int length = sizeof(obj);
 		return receive((char*)&obj, length) == length;
+	}
+
+	template<typename T>
+	bool receiveArray(T* arr, int size)
+	{
+		int length = size * sizeof(T);
+		return receive((char*)arr, length);
+	}
+
+	bool sendConfirm()
+	{//previos op confirmation
+		char conf = 1;
+		return send(conf);
+	}
+	bool sendRefuse()
+	{//previos op refutation
+		char refuse = 0;
+		return send(refuse);
+	}
+	bool receiveAck()
+	{//get confirm or refuse ->return true,false
+		char ack = 0;
+		receive<char>(ack);
+		return ack ? true : false;
 	}
 
 	string receiveMessage()
@@ -270,30 +340,34 @@ public:
 
 	bool select(Selection selection, int connectionTimeOut = 30)
 	{
-	 /*
-	 The select function returns the total number of socket handles
-	 that are ready and contained in the fd_set structures,
-	 zero if the time limit expired, or SOCKET_ERROR if an error occurred.
-	 */
+		/*
+		The select function returns the total number of socket handles
+		that are ready and contained in the fd_set structures,
+		zero if the time limit expired, or SOCKET_ERROR if an error occurred.
+		*/
 
-		timeval timeOut;	
-		timeOut.tv_usec = 0;	
-		timeOut.tv_sec = connectionTimeOut;   
+		timeval timeOut;
+		timeOut.tv_usec = 0;
+		timeOut.tv_sec = connectionTimeOut;
 
-		fd_set set;	
+		fd_set set;
 
-		FD_ZERO(&set);	
-		FD_SET(_handle, &set);	    
+		FD_ZERO(&set);
+		FD_SET(_handle, &set);
 		int retVal = 0;
-		if (selection == Selection::WriteCheck)
+
+		if (selection == Selection::ReadCheck)
 			retVal = ::select(_handle + 1,	//Ignored. The nfds parameter is included only for compatibility with Berkeley sockets.
 				&set,//An optional pointer to a set of sockets to be checked for readability.
 				NULL,//An optional pointer to a set of sockets to be checked for writability.
 				NULL,//An optional pointer to a set of sockets to be checked for errors.
 				&timeOut	//The maximum time for select to wait (TIMEVAL structure)
 				);
-		else if (selection == Selection::ReadCheck)
+		else if (selection == Selection::WriteCheck)
 			retVal = ::select(_handle + 1, NULL, &set, NULL, &timeOut);
+
+		else if (selection == Selection::ExceptCheck)
+			retVal = ::select(_handle + 1, NULL, NULL, &set, &timeOut);
 
 		return ((retVal != 0) && FD_ISSET(_handle, &set));
 	}
@@ -327,10 +401,10 @@ public:
 	{//check buffer size
 		int bufferSize = 0;
 		getSockOpt(SOL_SOCKET, SO_SNDBUF, bufferSize);
-#if defined (UNIX)
+#if defined(UNIX)
 		return bufferSize >> 1;
 #endif
-        return bufferSize;
+		return bufferSize;
 	}
 
 	bool setSendBufferSize(int bufferSize)
@@ -350,10 +424,10 @@ public:
 	{
 		int bufferSize = 0;
 		getSockOpt(SOL_SOCKET, SO_RCVBUF, bufferSize);
-#if defined (UNIX)
+#if defined(UNIX)
 		return bufferSize >> 1;
 #endif
-        return bufferSize;
+		return bufferSize;
 	}
 
 
@@ -431,16 +505,14 @@ protected:
 	{//default socket parameters 
 		_handle = handle;
 		_result = nullptr;
-		
+
 		_messageMaxSize = messageMaxSize;
 
 		//IP-portNo
 		_inetAddress.IP = IP;
 		_inetAddress.port = port;
 
-		//default send and receive socket system buffers size
-		void setDefaultSendRecvBufSizes();
-
+		_protocol = IPPROTO_TCP;
 	}
 	template<typename T>
 	bool setSockOpt(int level, int optname, T optval)
@@ -530,6 +602,64 @@ protected:
 		return _handle != INVALID_SOCKET;
 	}
 
+	bool bind(addrinfo* ptr)
+	{
+		int retValue = ::bind(_handle,	//дескриптор сокета
+			ptr->ai_addr, //структура, содержащуя локальный адрес, приписываемый socket'у
+			ptr->ai_addrlen);
+		return retValue != SOCKET_ERROR;
+	}
+
+	bool connect(addrinfo* pAddrInfo)
+	{//подключиться к серверу
+		int retValue = ::connect(_handle, pAddrInfo->ai_addr, (int)pAddrInfo->ai_addrlen);
+		if (retValue == SOCKET_ERROR)
+		{
+			closeSocket();
+			_handle = INVALID_SOCKET;
+			return false;
+		}
+		return true;
+	}
+
+	virtual bool attachServerSocket()
+	{
+		addrinfo* ptr;
+		for (ptr = _result; ptr != NULL; ptr = ptr->ai_next)
+		{
+			if (!socket(ptr))
+				continue;
+
+			if (bind(ptr))
+				return true;
+		}
+
+		return false;
+	}
+
+	void attachServerSocket_() { if (!attachServerSocket()) socketError("fail to attach to the port"); }
+public:
+	virtual bool attachClientSocket()
+	{
+
+		//подключиться к серверу
+		addrinfo* ptr;
+
+		for (ptr = _result; ptr != NULL; ptr = ptr->ai_next)
+		{
+			// Create a SOCKET for connecting to server
+			socket(ptr);
+			//если соед установлено,выйти из цикла
+			if (connect(ptr))
+				break;
+		}
+
+		//если не подключились к серверу
+		return _handle != INVALID_SOCKET;
+	}
+protected:
+	void attachClientSocket_() { if (!attachClientSocket()) socketError("Unable to connect to server"); }
+
 	//------------------------ закрытие объекта--------------------------------------//
 
 	void freeAddrInfo()
@@ -545,6 +675,7 @@ protected:
 	//-----------------------------обёртки для вызовов функций сокетов-----------------------------//
 	bool getAddrInfo(int family, int socktype, int protocol, int flags)
 	{
+		_protocol = protocol;
 		//создаёт прослушивающий сокет
 		memset(&_hints, 0, sizeof(_hints));
 		_hints.ai_family = family;
@@ -601,6 +732,9 @@ protected:
 	}
 
 };
+//static vars
+int Socket::_peerAddrLen = sizeof(sockaddr_storage);
+
 
 class ServerSocket : public Socket
 {
@@ -621,45 +755,8 @@ public:
 			AI_PASSIVE
 			);
 
-		socket_();
-		bind_();
+		attachServerSocket_();
 		listen_();
-	}
-
-	void socket_()
-	{
-		if (!socket(_result))
-			socketError("socket failed with error: ");
-	}
-
-	bool bind()
-	{//This function associates a local address with a socket.
-		int retValue = ::bind(_handle,	//дескриптор сокета
-			_result->ai_addr, //структура, содержащуя локальный адрес, приписываемый socket'у
-			_result->ai_addrlen);
-		return retValue != SOCKET_ERROR;
-	}
-
-	void bind_()
-	{
-		if (!bind())
-			socketError("bind failed with error: ");
-	}
-
-	bool listen()
-	{
-		//Now we can start listening (allowing as many connections as possible to
-		//be made at the same time using SOMAXCONN). You could specify any
-		//integer value equal to or lesser than SOMAXCONN instead for custom
-		//purposes). The function will not //return until a connection request is
-		//made
-		int retValue = ::listen(_handle, _nConnections);	//программы-сервера ожидает запросы к ней от программ-клиентов
-		return retValue != SOCKET_ERROR;
-	}
-	void listen_()
-	{
-		if (!listen())
-			socketError("listen failed with error: ");
 	}
 
 	Socket* accept()
@@ -683,9 +780,56 @@ public:
 		Socket* pClientSocket = new Socket(hClientSocket, addr);
 		return pClientSocket;
 	}
+
+private:
+
+	bool listen()
+	{
+		//Now we can start listening (allowing as many connections as possible to
+		//be made at the same time using SOMAXCONN). You could specify any
+		//integer value equal to or lesser than SOMAXCONN instead for custom
+		//purposes). The function will not //return until a connection request is
+		//made
+		int retValue = ::listen(_handle, _nConnections);	//программы-сервера ожидает запросы к ней от программ-клиентов
+		return retValue != SOCKET_ERROR;
+	}
+	void listen_()
+	{
+		if (!listen())
+			socketError("listen failed with error: ");
+	}
+
 };
 
+class UDP_ServerSocket : public Socket
+{
+private:
+	//запрет присваиваиня
+	UDP_ServerSocket(UDP_ServerSocket&);
+	UDP_ServerSocket& operator=(UDP_ServerSocket&);
+public:
+	UDP_ServerSocket(char* IP, char* port) : Socket(IP, port)
+	{
+		getAddrInfo_(AF_UNSPEC,	//allow IPv4,IPv6
+			SOCK_DGRAM,	//datagram socket
+			IPPROTO_UDP,
+			AI_PASSIVE
+			);
 
+		attachServerSocket_();
+	}
+
+	int raw_receive(char* buffer, int length, int flags) override
+	{
+		return ::recvfrom(_handle, buffer, length, flags, (sockaddr*)&_peerAddr, &_peerAddrLen);
+	}
+
+	int raw_send(const char* buffer, int length, int flags) override
+	{
+		return ::sendto(_handle, buffer, length, flags, (sockaddr*)&_peerAddr, _peerAddrLen);
+	}
+
+};
 
 class ClientSocket : public Socket
 {
@@ -704,49 +848,53 @@ public:
 			IPPROTO_TCP, //протокол TCP
 			0);	//без флагов
 
-		establishConnection_();
+		attachClientSocket_();
 	}
 
-
-	//-----------------------------обёртки для вызовов функций сокетов-----------------------------//
-
-	bool connect(addrinfo* pAddrInfo)
-	{//подключиться к серверу
-		int retValue = ::connect(_handle, pAddrInfo->ai_addr, (int)pAddrInfo->ai_addrlen);
-		if (retValue == SOCKET_ERROR)
-		{
-			closeSocket();
-			_handle = INVALID_SOCKET;
-			return false;
-		}
-		return true;
-	}
-	bool establishConnection()
-	{
-
-		//подключиться к серверу
-		addrinfo* ptr;
-
-		for (ptr = _result; ptr != NULL; ptr = ptr->ai_next)
-		{
-			// Create a SOCKET for connecting to server
-			socket(ptr);
-			//если соед установлено,выйти из цикла
-			if (connect(ptr))
-				break;
-		}
-
-		//если не подключились к серверу
-		return _handle != INVALID_SOCKET;
-	}
-	
-	void establishConnection_()
-	{
-		if (!establishConnection())
-			socketError("Unable to connect to server");
-	}
 
 };
 
+class UDP_ClientSocket : public Socket
+{
+private:
+	//запрет присваиваиня
+	UDP_ClientSocket(UDP_ClientSocket&);
+	UDP_ClientSocket& operator=(UDP_ClientSocket&);
+public:
+	UDP_ClientSocket(char* IP, char* port) : Socket(IP, port)
+	{
+		getAddrInfo_(AF_UNSPEC,	//allow IPv4,IPv6
+			SOCK_DGRAM,	//datagram socket
+			IPPROTO_UDP,
+			0
+			);
+
+		attachClientSocket_();
+	}
+
+	bool attachClientSocket() override
+	{
+		addrinfo* ptr;
+		for (ptr = _result; ptr != NULL; ptr = ptr->ai_next)
+		{
+			if (socket(ptr))
+			{
+				_pServAddr = ptr;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	int raw_receive(char* buffer, int length, int flags) override
+	{
+		return ::recvfrom(_handle, buffer, length, flags, (sockaddr*)_pServAddr->ai_addr, (int*)&_pServAddr->ai_addrlen);
+	}
+
+	int raw_send(const char* buffer, int length, int flags) override
+	{
+		return ::sendto(_handle, buffer, length, flags, (sockaddr*)_pServAddr->ai_addr, _pServAddr->ai_addrlen);
+	}
+};
 
 #endif //SOCKET_H

@@ -65,7 +65,7 @@ public:
 			throw runtime_error("datagram error");
 		}
 		//compare local and remote
-		int areEqual = std::equal(_receivedDatagrams.begin(), _receivedDatagrams.end(), _trackedDatagrams.begin(),_trackedDatagrams.end());
+		int areEqual = std::equal(_receivedDatagrams.begin(), _receivedDatagrams.end(), _trackedDatagrams.begin());
 		_receivedDatagrams.clear();
 		_trackedDatagrams.clear();
 		

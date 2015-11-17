@@ -23,7 +23,8 @@ private:
 	//totaly number of bytes accurately received
 	int _totallyBytesReceived;
 	int _totallyBytesSend;
-
+	//percent counter
+	int _totalPercent;
 	//UDP packet control
 	vector<int> _trackedDatagrams;
 	//received by receiver
@@ -38,7 +39,7 @@ public:
 		_totallyBytesReceived = 0;
 		_totallyBytesReceived = 0;
 		_fileLength = 0;
-
+		_totalPercent = 0;
 		if (_socket->protocol() == IPPROTO_UDP)
 		{
 			_nPacks = nPacks;
@@ -100,11 +101,9 @@ public:
 	}
 	ostream& showPercents(ostream& stream, int loadingPercent, int milestone, char placeholder)
 	{
-		static int totalPercent = 0;
-
 		if (!loadingPercent) return stream;
 		//skip zeros
-		int i = totalPercent;
+		int i = _totalPercent;
 		if (i == 0) i++;
 		for (i; i < loadingPercent; i++)
 			if (i % milestone == 0)
@@ -115,10 +114,10 @@ public:
 		if (loadingPercent == 100)
 		{
 			stream << loadingPercent << endl;
-			totalPercent = 0;
+			_totalPercent = 0;
 		}
 
-		totalPercent += loadingPercent - totalPercent;
+		_totalPercent = loadingPercent;
 		return stream;
 	}
 	void trackSendPercent()
@@ -196,10 +195,10 @@ public:
 				if (_rdFile.eof())
 				{
 					//timeOut / 2
-					_socket->setSendTimeOut(_timeOut >> 1);
+					_socket->setReceiveTimeOut(_timeOut >> 1);
 					//check bytes that client has received
 					_socket->receive(_totallyBytesReceived); 
-					_socket->setSendTimeOut(_timeOut);
+					_socket->disableReceiveTimeOut();
 
 					if (_totallyBytesReceived == _fileLength)
 						break;
@@ -274,8 +273,10 @@ public:
 				//end of transmittion check
 				if (_totallyBytesReceived == _fileLength)
 				{//file uploaded
+					_socket->setSendTimeOut(_timeOut >> 1);
 				 //transmit to server bytes number that has received
 					_socket->send(_totallyBytesReceived);
+					_socket->disableSendTimeOut();
 					break;
 				}
 			}

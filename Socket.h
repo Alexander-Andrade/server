@@ -821,12 +821,12 @@ public:
 
 	int raw_receive(char* buffer, int length, int flags) override
 	{
-		return ::recvfrom(_handle, buffer, length, flags, (sockaddr*)&_peerAddr, &_peerAddrLen);
+		return ::recvfrom(_handle, buffer, length, flags, (sockaddr*)&_peerAddr, (socklen_t*)&_peerAddrLen);
 	}
 
 	int raw_send(const char* buffer, int length, int flags) override
 	{
-		return ::sendto(_handle, buffer, length, flags, (sockaddr*)&_peerAddr, _peerAddrLen);
+		return ::sendto(_handle, buffer, length, flags, (sockaddr*)&_peerAddr, (socklen_t)_peerAddrLen);
 	}
 
 };
@@ -888,12 +888,12 @@ public:
 
 	int raw_receive(char* buffer, int length, int flags) override
 	{
-		return ::recvfrom(_handle, buffer, length, flags, (sockaddr*)_pServAddr->ai_addr, (int*)&_pServAddr->ai_addrlen);
+		return ::recvfrom(_handle, buffer, length, flags, (sockaddr*)_pServAddr->ai_addr, (socklen_t*)&_pServAddr->ai_addrlen);
 	}
 
 	int raw_send(const char* buffer, int length, int flags) override
 	{
-		return ::sendto(_handle, buffer, length, flags, (sockaddr*)_pServAddr->ai_addr, _pServAddr->ai_addrlen);
+		return ::sendto(_handle, buffer, length, flags, (sockaddr*)_pServAddr->ai_addr, (socklen_t)_pServAddr->ai_addrlen);
 	}
 };
 

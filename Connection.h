@@ -23,15 +23,17 @@ private:
 	//totaly number of bytes accurately received
 	int _totallyBytesReceived;
 	int _totallyBytesSend;
+
 	//percent counter
 	int _totalPercent;
+
 	//UDP packet control
 	vector<int> _trackedDatagrams;
 	//received by receiver
 	vector<int> _receivedDatagrams;
 	int _nPacks;
 public:
-	FileWorker(Socket* socket, std::function<Socket*(int)>& tryToReconnect, int bufLen, int timeOut,int nPacks = 1) : _bufLen(bufLen), _timeOut(timeOut)
+	FileWorker(Socket* socket, std::function<Socket*(int)>& tryToReconnect, int bufLen, int timeOut, int nPacks = 1) : _bufLen(bufLen), _timeOut(timeOut)
 	{
 		_socket = socket;
 		_tryToReconnect = tryToReconnect;
@@ -39,7 +41,9 @@ public:
 		_totallyBytesReceived = 0;
 		_totallyBytesReceived = 0;
 		_fileLength = 0;
+
 		_totalPercent = 0;
+
 		if (_socket->protocol() == IPPROTO_UDP)
 		{
 			_nPacks = nPacks;
@@ -53,24 +57,24 @@ public:
 		if (_trackedDatagrams.size() < _nPacks)
 		{
 			_trackedDatagrams.push_back(_totallyBytesSend);
-			return ;
+			return;
 		}
 		_socket->setReceiveTimeOut(_timeOut >> 1);
 
 		_receivedDatagrams.resize(_nPacks);
-		int recvRealSize = _socket->receiveArray(_receivedDatagrams.data(),_receivedDatagrams.size());
+		int recvRealSize = _socket->receiveArray(_receivedDatagrams.data(), _receivedDatagrams.size());
 		if (recvRealSize != _trackedDatagrams.size())
 		{
 			_receivedDatagrams.clear();
 			_trackedDatagrams.clear();
-			throw runtime_error("datagram error");
+			throw runtime_error("connection is lost");
 		}
 		//compare local and remote
 		int areEqual = std::equal(_receivedDatagrams.begin(), _receivedDatagrams.end(), _trackedDatagrams.begin());
 		_receivedDatagrams.clear();
 		_trackedDatagrams.clear();
-		
-		if (!areEqual) 
+
+		if (!areEqual)
 			throw runtime_error("connection is lost");
 	}
 
@@ -89,7 +93,7 @@ public:
 	{
 		//send timeout less than receive timeout
 		if (!_socket->setSendTimeOut(_timeOut >> 2)) return false;	//(/4)
-																	//try to set system buffer size = _bufLen
+		//try to set system buffer size = _bufLen
 		if (!_socket->setSendBufferSize(_bufLen)) return  false;
 	}
 	ostream& outFileInfo(ostream& stream)
@@ -99,9 +103,10 @@ public:
 		stream << endl;
 		return stream;
 	}
-	ostream& showPercents(ostream& stream, int loadingPercent, int milestone, char placeholder)
+	void showPercents(ostream& stream, int loadingPercent, int milestone, char placeholder)
 	{
-		if (!loadingPercent) return stream;
+
+		if (!loadingPercent) return;
 		//skip zeros
 		int i = _totalPercent;
 		if (i == 0) i++;
@@ -116,9 +121,9 @@ public:
 			stream << loadingPercent << endl;
 			_totalPercent = 0;
 		}
-
+		stream << std::flush;
 		_totalPercent = loadingPercent;
-		return stream;
+		return;
 	}
 	void trackSendPercent()
 	{
@@ -182,7 +187,7 @@ public:
 				bytesWrite = _socket->send(_buffer.data(), fileByteRead);
 
 				if (bytesWrite == SOCKET_ERROR)
-					throw runtime_error("send error");
+					throw runtime_error("connection is lost");
 
 				_totallyBytesSend += bytesWrite;
 
@@ -197,7 +202,7 @@ public:
 					//timeOut / 2
 					_socket->setReceiveTimeOut(_timeOut >> 1);
 					//check bytes that client has received
-					_socket->receive(_totallyBytesReceived); 
+					_socket->receive(_totallyBytesReceived);
 					_socket->disableReceiveTimeOut();
 
 					if (_totallyBytesReceived == _fileLength)
@@ -267,14 +272,14 @@ public:
 				if (_socket->protocol() == IPPROTO_UDP)
 					trackReceivingDatagrams();
 				//recv OOB byte with loading percent value
-				if (_socket->protocol() == IPPROTO_TCP)
-					trackReceivePercent();
+				(_socket->protocol() == IPPROTO_TCP) ? trackReceivePercent() : showPercents(cout,percentOfLoading(_totallyBytesReceived),20,'.');
 
-				//end of transmittion check
+
+				//end of transition check
 				if (_totallyBytesReceived == _fileLength)
 				{//file uploaded
 					_socket->setSendTimeOut(_timeOut >> 1);
-				 //transmit to server bytes number that has received
+					//transmit to server bytes number that has received
 					_socket->send(_totallyBytesReceived);
 					_socket->disableSendTimeOut();
 					break;
@@ -320,9 +325,6 @@ private:
 
 		if (_rdFile.eof())
 			_rdFile.clear();
-
-		_totallyBytesSend = _totallyBytesReceived;
-
 		return true;
 	}
 

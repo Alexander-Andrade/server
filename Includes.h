@@ -3,6 +3,8 @@
 
 #define WINDOWS
 
+
+
 #if defined(WINDOWS)
 #define _CRT_SECURE_NO_WARNINGS	//ctime unsafe
 #define NOMINMAX	//windows.h -> define min,max

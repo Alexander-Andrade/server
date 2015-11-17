@@ -11,7 +11,7 @@ int main(int argc,char* argv[])
 
 		Server server("192.168.1.3","7000");
 		server.workWithClients();
-		
+		//some comments
 	}
 	catch (exception e)
 	{

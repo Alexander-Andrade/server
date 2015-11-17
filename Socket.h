@@ -311,6 +311,35 @@ public:
 		return message;
 	}
 
+	int sendall(const char* buf,int len,int flags)
+	{
+		int total = 0;
+		int n = 0;
+
+		while (total < len)
+		{
+			n = raw_send(buf + total, len - total, flags);
+			if (n == SOCKET_ERROR) break;
+			total += n;
+		}
+
+		return (n == SOCKET_ERROR) ? SOCKET_ERROR : total;
+	}
+
+	int recvall(char* buf, int len, int flags)
+	{
+		int total = 0;
+		int n = 0;
+
+		while (total < len)
+		{
+			n = raw_receive(buf + total, len - total, flags);
+			if (n == SOCKET_ERROR) break;
+			if (n == 0) n;	//connection is broken
+			total += n;
+		}
+		return (n == SOCKET_ERROR) ? SOCKET_ERROR : total;
+	}
 
 	bool isValid()
 	{//socket check

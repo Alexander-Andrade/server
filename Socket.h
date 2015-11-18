@@ -216,7 +216,7 @@ public:
 	}
 
 	template<typename T>
-	bool sendArray(T* arr,int size)
+	bool sendArray(T* arr, int size)
 	{
 		int length = size * sizeof(T);
 		return send((char*)arr, length);
@@ -311,7 +311,7 @@ public:
 		return message;
 	}
 
-	int sendall(const char* buf,int len,int flags)
+	int sendall(const char* buf, int len, int flags)
 	{
 		int total = 0;
 		int n = 0;
